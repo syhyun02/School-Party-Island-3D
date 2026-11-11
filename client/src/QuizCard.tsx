@@ -1,0 +1,10 @@
+import {useEffect,useState} from 'react';
+import type {Socket} from 'socket.io-client';
+export type PublicQuiz={nonce:string;topic:string;question:string;options:string[];opens:number;expires:number;practice:boolean};
+export function QuizCard({quiz,socket,paused,onClose}:{quiz:PublicQuiz;socket:Socket;paused:boolean;onClose:()=>void}){
+ const [result,setResult]=useState<any>(null),[choice,setChoice]=useState<number|null>(null),[error,setError]=useState(''),[seconds,setSeconds]=useState(20),[busy,setBusy]=useState(false);
+ useEffect(()=>{if(paused)return;const update=()=>setSeconds(Math.max(0,Math.ceil((quiz.expires-Date.now())/1000)));update();const id=setInterval(update,200);return()=>clearInterval(id);},[quiz.expires,paused]);
+ return <div className="quiz-backdrop"><section className="quiz-card" role="dialog" aria-modal="true" aria-label="교육 퀴즈"><div className="quiz-meta"><span>{quiz.practice?'연습 · 점수 미반영':'정답 +10점'} / {quiz.topic}</span><b>{paused?'일시정지':seconds+'초'}</b></div><div className="quiz-icon">✦</div><h2>{quiz.question}</h2><div className="quiz-options">{quiz.options.map((option,i)=><button key={i} className={result?(i===result.answer?'correct':i===choice?'wrong':''):''} disabled={busy||!!result||seconds===0||paused} onClick={()=>{setChoice(i);setBusy(true);setError('');socket.timeout(5000).emit('quiz:answer',{nonce:quiz.nonce,choice:i},(err:Error|null,data:any)=>{setBusy(false);if(err)setError('연결을 확인한 뒤 다시 시도해 주세요.');else if(data.error)setError(data.error);else setResult(data);});}}><b>{i+1}</b>{option}</button>)}</div>
+ {result?<div className="fact-card"><strong>{result.correct?'정답이에요!':'함께 알아볼까요?'} {result.points>0?'학급 기여 +10점':''}</strong><p>{result.fact}</p><button className="primary" onClick={onClose}>모험으로 돌아가기 →</button></div>:seconds===0?<div className="fact-card"><p>시간이 끝났어요. 다음 문제에 도전해 보세요.</p><button onClick={onClose}>닫기</button></div>:<p className="muted">한 번 제출한 답은 바꿀 수 없어요.</p>}
+ {error&&<p role="alert" className="error">{error}</p>}</section></div>;
+}
