@@ -6,21 +6,73 @@ import {gameNames,instructions,palette,colorNames,jumpHeight,tileColor,barAngle,
 import {Character,ArenaDecor,Block} from './World';
 import {Kart,RobotChassis,RaceDecor} from './Vehicles';
 import {StaticBatch} from './StaticBatch';
+import {control,currentInput} from './controls';
 const colors=['#ffb338','#a59bff','#64d6bc','#ff839f'];
 function Box({position,size,color}:{position:[number,number,number];size:[number,number,number];color:string}){
  return <Block at={position} size={size} color={color} radius={.08}/>;
 }
 type Time={current:number};
 // Server snapshots arrive ~20 times a second; everything below animates every frame between them.
-function Racer({a,index,game,elapsed,time}:{a:Actor;index:number;game:string;elapsed:number;time:Time}){
+const cooldowns:Record<string,number>={kart:3,photo:1.6,robot:1.6};
+function Racer({a,index,game,elapsed,time,self,running}:{a:Actor;index:number;game:string;elapsed:number;time:Time;self:boolean;running:boolean}){
  const ref=useRef<THREE.Group>(null!),speed=useRef(a.speed);speed.current=a.speed;
  const track=useRef({seen:a,fromX:a.x,fromZ:a.z,fromRot:0,at:0,last:0,span:50});
+ // Own character: simulated locally from live input so it responds on the very next frame, then eased back to the server's verdict.
+ const mine=useRef({x:a.x,z:a.z,dx:a.dx,dz:a.dz,lane:a.lane,actionAt:-10,jumpAt:-10,actions:control.actions,idle:0});
+ const lap=useRef(a.progress),lane=useRef(a.lane);
+ const [localWalk,setLocalWalk]=useState(false);
+ const active=self&&a.outAt===null&&a.finishAt===null;
  useFrame((_,dt)=>{
- const now=performance.now(),t=track.current,g=ref.current;
+ const now=performance.now(),t=track.current,g=ref.current,p=mine.current,clock=time.current;
+ dt=Math.min(dt,.1);
+ if(game==='kart'){
+ // Progress only ever moves forward at a known speed, so advance it locally and nudge it toward where the server should be by now.
+ if(t.seen!==a){t.seen=a;t.at=now;}
+ const live=running&&a.finishAt===null,ahead=lap.current+(live?a.speed*dt:0),target=a.progress+(live?a.speed*Math.min(.25,(now-t.at)/1000):0);
+ lap.current=Math.abs(target-ahead)>3?target:ahead+(target-ahead)*Math.min(1,dt*4);
+ if(active){
+ const input=running?currentInput():{x:0,z:0};
+ p.lane=THREE.MathUtils.clamp(p.lane+input.x*dt*3,-2.6,2.6);
+ p.idle=input.x?0:p.idle+dt;
+ const gap=a.lane-p.lane,allow=p.idle>.5?0:.6;
+ if(Math.abs(gap)>allow)p.lane+=Math.sign(gap)*(Math.abs(gap)-allow)*Math.min(1,dt*8);
+ lane.current=p.lane;
+ }else lane.current+=(a.lane-lane.current)*Math.min(1,dt*12);
+ const angle=lap.current/7;
+ g.position.set(Math.cos(angle)*(7+lane.current),0,Math.sin(angle)*(7+lane.current));g.rotation.y=-angle;
+ return;
+ }
+ if(active){
+ const input=running?currentInput():{x:0,z:0};
+ if(p.actions!==control.actions){
+ p.actions=control.actions;
+ if(running&&game!=='meteor'&&clock-Math.max(a.actionAt,p.actionAt)>=(cooldowns[game]??1)){p.actionAt=clock;if(game==='color'||game==='lighthouse')p.jumpAt=clock;}
+ }
+ const moving=Math.hypot(input.x,input.z)>.1;
+ if(moving!==localWalk)setLocalWalk(moving);
+ if(game==='lighthouse'){p.x=a.x;p.z=a.z;}
+ else{
+ if(moving){const len=Math.hypot(input.x,input.z);p.dx=input.x/len;p.dz=input.z/len;}
+ const dash=(game==='photo'||game==='robot')&&clock-Math.max(a.actionAt,p.actionAt)<.3;
+ p.x+=(dash?p.dx*10:input.x*4)*dt;p.z+=(dash?p.dz*10:input.z*4)*dt;
+ if(game==='color'){p.x=THREE.MathUtils.clamp(p.x,-4.85,4.85);p.z=THREE.MathUtils.clamp(p.z,-4.85,4.85);}
+ else{const r=Math.hypot(p.x,p.z);if(r>4.7){p.x*=4.7/r;p.z*=4.7/r;}}
+ // The server trails the local position by the network delay; tolerate that lead, correct anything beyond it (pushes, hits).
+ p.idle=moving||dash?0:p.idle+dt;
+ const gx=a.x-p.x,gz=a.z-p.z,gap=Math.hypot(gx,gz),allow=p.idle>.5?0:1;
+ if(gap>3){p.x=a.x;p.z=a.z;}
+ else if(gap>allow){const pull=(gap-allow)/gap*Math.min(1,dt*8);p.x+=gx*pull;p.z+=gz*pull;}
+ }
+ const jumpAt=clock-p.jumpAt<.8?p.jumpAt:a.jumpAt;
+ g.position.set(p.x,jumpHeight({...a,jumpAt},clock),p.z);
+ g.rotation.y=Math.atan2(p.dx,p.dz);
+ t.seen=a;t.fromX=p.x;t.fromZ=p.z;t.fromRot=g.rotation.y;t.at=t.last=now;
+ return;
+ }
  if(t.seen!==a){t.seen=a;t.fromX=g.position.x;t.fromZ=g.position.z;t.fromRot=g.rotation.y;t.span=Math.max(40,Math.min(200,now-t.last));t.last=t.at=now;}
  const far=Math.hypot(a.x-t.fromX,a.z-t.fromZ)>4,k=far?1:Math.min(1,(now-t.at)/t.span);
- const rot=game==='kart'?-a.progress/7:Math.atan2(a.dx,a.dz),turn=Math.atan2(Math.sin(rot-t.fromRot),Math.cos(rot-t.fromRot));
- const y=a.outAt!==null?THREE.MathUtils.lerp(g.position.y,-1.7,Math.min(1,dt*15)):jumpHeight(a,time.current);
+ const rot=Math.atan2(a.dx,a.dz),turn=Math.atan2(Math.sin(rot-t.fromRot),Math.cos(rot-t.fromRot));
+ const y=a.outAt!==null?THREE.MathUtils.lerp(g.position.y,-1.7,Math.min(1,dt*15)):jumpHeight(a,clock);
  g.position.set(t.fromX+(a.x-t.fromX)*k,y,t.fromZ+(a.z-t.fromZ)*k);
  g.rotation.y=t.fromRot+turn*k;
  });
@@ -28,7 +80,7 @@ function Racer({a,index,game,elapsed,time}:{a:Actor;index:number;game:string;ela
  return <group ref={ref} position={[a.x,0,a.z]}><mesh rotation={[-Math.PI/2,0,0]} position={[0,.03,0]}><ringGeometry args={[.5,.58,24]}/><meshBasicMaterial color={colors[index]}/></mesh>
  {kart&&<Kart index={a.avatar} speed={speed} boosting={elapsed-a.actionAt<1.2}/>}
  {robot&&<RobotChassis index={a.avatar} dashing={elapsed-a.actionAt<.3}/>}
- <group position={[0,kart?.4:0,0]} scale={.85}><Character index={a.avatar} robot={robot} walking={Math.hypot(a.input.x,a.input.z)>.1}/></group>
+ <group position={[0,kart?.4:0,0]} scale={.85}><Character index={a.avatar} robot={robot} walking={active?localWalk:Math.hypot(a.input.x,a.input.z)>.1}/></group>
  {robot&&Array.from({length:a.hp},(_,i)=><group key={i} position={[(i-1)*.35,1.8,0]}><mesh><sphereGeometry args={[.2,8,8]}/><meshStandardMaterial color={colors[a.avatar]}/></mesh><Box position={[0,-.35,0]} size={[.015,.7,.015]} color="#fff"/></group>)}
  {elapsed-a.actionAt<.3&&(game==='photo'||robot)&&<mesh rotation={[-Math.PI/2,0,0]} position={[0,.06,0]}><ringGeometry args={[.45,.7,16]}/><meshBasicMaterial color="#fff6a1" side={THREE.DoubleSide}/></mesh>}
  </group>;
@@ -66,7 +118,7 @@ const Arena=memo(function Arena({game,low}:{game:string;low:boolean}){
  {game==='robot'&&Array.from({length:12},(_,i)=><Box key={i} position={[Math.cos(i*Math.PI/6)*5.25,.5,Math.sin(i*Math.PI/6)*5.25]} size={[.35,1,.35]} color="#61d6d0"/>)}
  </StaticBatch>;
 });
-export function MiniScene({mini:m,low=false,running=false}:{mini:MiniState;low?:boolean;running?:boolean}){
+export function MiniScene({mini:m,low=false,running=false,playerId=''}:{mini:MiniState;low?:boolean;running?:boolean;playerId?:string}){
  const {camera}=useThree();
  useEffect(()=>{camera.position.set(0,m.game==='kart'?22:17,m.game==='kart'?18:13);camera.lookAt(0,0,0);},[camera,m.game]);
  // Local estimate of the server's game clock, eased toward each snapshot so motion never steps backwards.
@@ -81,23 +133,26 @@ export function MiniScene({mini:m,low=false,running=false}:{mini:MiniState;low?:
  {m.game==='lighthouse'&&<SpinBar time={time}/>}
  {m.game==='meteor'&&m.hazards.map(h=><Meteor key={h.id} h={h} time={time}/>)}
  {m.game==='photo'&&m.elapsed<m.flashUntil&&<pointLight position={[0,5,0]} intensity={120} color="white"/>}
- {m.actors.map((a,i)=><Racer key={a.id} a={a} index={i} game={m.game} elapsed={m.elapsed} time={time}/>)}
+ {m.actors.map((a,i)=><Racer key={a.id} a={a} index={i} game={m.game} elapsed={m.elapsed} time={time} self={a.id===playerId} running={running}/>)}
  </>;
 }
 export function MiniControls({mini:m,id,socket}:{mini:MiniState;id:string;socket:Socket}){
- const keys=useRef(new Set<string>()),stick=useRef({x:0,z:0}),pad=useRef<HTMLDivElement>(null);
+ const pad=useRef<HTMLDivElement>(null);
  const [knob,setKnob]=useState({x:0,z:0});
  const a=m.actors.find(p=>p.id===id)!;
+ // Changes are sent the moment they happen; the timer only keeps the server's 350ms input expiry alive.
+ const send=()=>socket.emit('input',currentInput());
+ const act=()=>{control.actions++;socket.emit('action');};
  useEffect(()=>{
- const down=(e:KeyboardEvent)=>{if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' ','w','a','s','d'].includes(e.key)){e.preventDefault();keys.current.add(e.key);if(e.key===' '&&!e.repeat)socket.emit('action');}};
- const up=(e:KeyboardEvent)=>keys.current.delete(e.key);
- const reset=()=>{keys.current.clear();stick.current={x:0,z:0};setKnob({x:0,z:0});socket.emit('input',{x:0,z:0});};
+ const down=(e:KeyboardEvent)=>{if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' ','w','a','s','d'].includes(e.key)){e.preventDefault();if(e.key===' '){if(!e.repeat)act();}else if(!control.keys.has(e.key)){control.keys.add(e.key);send();}}};
+ const up=(e:KeyboardEvent)=>{if(control.keys.delete(e.key))send();};
+ const reset=()=>{control.keys.clear();control.stick={x:0,z:0};setKnob({x:0,z:0});send();};
  window.addEventListener('keydown',down);window.addEventListener('keyup',up);window.addEventListener('blur',reset);
- const timer=setInterval(()=>{const k=keys.current;socket.emit('input',{x:stick.current.x+(k.has('ArrowRight')||k.has('d')?1:0)-(k.has('ArrowLeft')||k.has('a')?1:0),z:stick.current.z+(k.has('ArrowDown')||k.has('s')?1:0)-(k.has('ArrowUp')||k.has('w')?1:0)});},50);
+ const timer=setInterval(send,50);
  return()=>{clearInterval(timer);window.removeEventListener('keydown',down);window.removeEventListener('keyup',up);window.removeEventListener('blur',reset);reset();};
  },[socket,m.game]);
- const move=(e:React.PointerEvent<HTMLDivElement>)=>{const r=e.currentTarget.getBoundingClientRect();const x=(e.clientX-r.left-r.width/2)/42,z=(e.clientY-r.top-r.height/2)/42,len=Math.max(1,Math.hypot(x,z));stick.current={x:x/len,z:z/len};setKnob(stick.current);};
- const reset=()=>{stick.current={x:0,z:0};setKnob(stick.current);socket.emit('input',stick.current);};
+ const move=(e:React.PointerEvent<HTMLDivElement>)=>{const r=e.currentTarget.getBoundingClientRect();const x=(e.clientX-r.left-r.width/2)/42,z=(e.clientY-r.top-r.height/2)/42,len=Math.max(1,Math.hypot(x,z));control.stick={x:x/len,z:z/len};setKnob(control.stick);send();};
+ const reset=()=>{control.stick={x:0,z:0};setKnob(control.stick);send();};
  const actionLabel=m.game==='kart'?'부스터':m.game==='photo'?'대시':m.game==='robot'?'돌진':'점프';
  return <><div className="mini-instructions"><b>{gameNames[m.game]}</b><span>{instructions[m.game]}</span>
  {m.game==='color'&&<strong style={{background:palette[m.safe],color:'#243841'}}>안전: {colorNames[m.safe]} · {m.collapsed?'발판 붕괴!':Math.ceil(6-m.elapsed%7.5)+'초'}</strong>}
@@ -107,6 +162,6 @@ export function MiniControls({mini:m,id,socket}:{mini:MiniState;id:string;socket
  </div>
  {a.outAt!==null?<div className="eliminated">탈락 · 친구들의 경기를 관전 중</div>:a.finishAt!==null?<div className="eliminated">완주! {a.finishAt.toFixed(2)}초</div>:<>
  {m.game!=='lighthouse'&&<div aria-label="이동 조이스틱" className="joystick" ref={pad} onPointerDown={e=>{e.currentTarget.setPointerCapture(e.pointerId);move(e);}} onPointerMove={e=>{if(e.currentTarget.hasPointerCapture(e.pointerId))move(e);}} onPointerUp={reset} onPointerCancel={reset} onLostPointerCapture={reset}><span style={{transform:'translate('+knob.x*36+'px,'+knob.z*36+'px)'}}>✥</span></div>}
- {m.game!=='meteor'&&<button className="primary mini-action" disabled={m.elapsed-a.actionAt<(m.game==='kart'?3:['photo','robot'].includes(m.game)?1.6:1)||(m.game==='kart'&&a.boosts===0)} onPointerDown={()=>socket.emit('action')}>{actionLabel}<small>SPACE</small></button>}
+ {m.game!=='meteor'&&<button className="primary mini-action" disabled={m.elapsed-a.actionAt<(m.game==='kart'?3:['photo','robot'].includes(m.game)?1.6:1)||(m.game==='kart'&&a.boosts===0)} onPointerDown={act}>{actionLabel}<small>SPACE</small></button>}
  </>}</>;
 }
