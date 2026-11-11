@@ -109,7 +109,8 @@ setInterval(()=>{const now=Date.now(),dt=Math.min(.1,(now-last)/1000);last=now;t
  }
  }
  if(r.phase==='miniResults'&&!r.practice&&now>=r.until){if(r.round===5){r.phase='results';r.message='섬 탐험 완료!';}else{r.round++;board(r);}}
- if(tick%2===0&&r.players.some(p=>p.connected))emit(r);
+ // Minigames stream every tick (20Hz) for smooth motion; slower phases only need timers, and events emit on their own.
+ if((r.phase==='mini'||tick%5===0)&&r.players.some(p=>p.connected))emit(r);
  }
 },50);
 http.listen(Number(process.env.PORT)||3001,'0.0.0.0');

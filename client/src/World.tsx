@@ -1,8 +1,9 @@
-import {useEffect,useMemo,useRef,useState} from 'react';
+import {memo,useEffect,useMemo,useRef,useState} from 'react';
 import {useFrame,useThree} from '@react-three/fiber';
 import {OrbitControls,RoundedBox,Float} from '@react-three/drei';
 import * as THREE from 'three';
 import {movePosition,ROLL_MS} from '../../shared/presentation';
+import {StaticBatch} from './StaticBatch';
 export const playerColors=['#f8b84a','#a292ed','#60cdb9','#f3839c'];
 type V3=[number,number,number];
 export function Ball({at=[0,0,0],scale=[1,1,1],color='#fff'}:{at?:V3;scale?:V3;color?:string}){
@@ -11,12 +12,12 @@ export function Ball({at=[0,0,0],scale=[1,1,1],color='#fff'}:{at?:V3;scale?:V3;c
 export function Block({at=[0,0,0],size=[1,1,1],color='#fff',radius=.12}:{at?:V3;size?:V3;color?:string;radius?:number}){
  return <RoundedBox position={at} args={size} radius={Math.min(radius,...size.map(n=>n/3))} smoothness={2} castShadow receiveShadow><meshStandardMaterial color={color} roughness={.7}/></RoundedBox>;
 }
-export function Character({index=0,walking=false,robot=false}:{index?:number;walking?:boolean;robot?:boolean}){
+export const Character=memo(function Character({index=0,walking=false,robot=false}:{index?:number;walking?:boolean;robot?:boolean}){
  const body=useRef<THREE.Group>(null!),left=useRef<THREE.Group>(null!),right=useRef<THREE.Group>(null!);
  useFrame(({clock})=>{const t=clock.elapsedTime;body.current.position.y=Math.sin(t*(walking?14:2.5))*(walking?.065:.025);left.current.rotation.x=walking?Math.sin(t*14)*.55:0;right.current.rotation.x=-left.current.rotation.x;});
  const c=playerColors[index%4],fur=['#fff1d6','#f4eaff','#e5fae5','#ffe9df'][index%4];
  return <group><mesh rotation={[-Math.PI/2,0,0]} position={[0,.025,0]}><circleGeometry args={[.48,20]}/><meshBasicMaterial color="#274c4a" transparent opacity={.18} depthWrite={false}/></mesh>
- <group ref={body}>
+ <group ref={body}><StaticBatch bakeKey={index+':'+robot}>
  {index%4===3&&<group position={[0,.6,-.4]} rotation={[.3,0,0]}><Ball at={[0,.15,-.12]} scale={[.3,.5,.26]} color="#dba284"/><Ball at={[0,.15,-.32]} scale={[.09,.42,.07]} color="#fff0ce"/></group>}
  {index%4===1&&<group position={[0,.45,-.4]} rotation={[.9,0,0]}><Ball at={[0,.05,-.12]} scale={[.2,.36,.2]} color="#c6a1da"/><Ball at={[0,-.18,-.12]} scale={[.17,.15,.17]} color="#fff0de"/></group>}
  <Ball at={[0,.65,0]} scale={[.36,.43,.29]} color={c}/>
@@ -29,10 +30,11 @@ export function Character({index=0,walking=false,robot=false}:{index?:number;wal
  <mesh position={[0,1.02,.412]} rotation={[0,0,Math.PI]}><torusGeometry args={[.07,.012,6,12,Math.PI]}/><meshStandardMaterial color="#714a4b"/></mesh>
  <Block at={[0,.7,-.3]} size={[.38,.4,.16]} color="#b67c58"/>
  <Block at={[0,.9,.27]} size={[.33,.1,.08]} color="#fff6d1"/>
+ </StaticBatch>
  <group ref={left} position={[-.19,.3,0]}><Ball at={[0,-.08,.05]} scale={[.17,.2,.24]} color="#fef4df"/></group>
  <group ref={right} position={[.19,.3,0]}><Ball at={[0,-.08,.05]} scale={[.17,.2,.24]} color="#fef4df"/></group>
  </group></group>;
-}
+});
 export function Tree({at=[0,0,0],size=1,palm=false}:{at?:V3;size?:number;palm?:boolean}){
  return <group position={at} scale={size}><mesh position={[0,1,0]} castShadow><cylinderGeometry args={[.16,.25,2,8]}/><meshStandardMaterial color="#bd8960"/></mesh>
  {palm?Array.from({length:6},(_,i)=><group key={i} rotation={[0,i*Math.PI/3,0]} position={[0,2,0]}><Ball at={[.65,0,0]} scale={[1.1,.14,.3]} color={i%2?'#52ac79':'#76c37e'}/></group>):<><Ball at={[0,2,0]} scale={[.95,.95,.85]} color="#4aab7d"/><Ball at={[-.55,1.9,.1]} scale={[.65,.7,.65]} color="#67be87"/><Ball at={[.4,2.55,0]} scale={[.62,.7,.58]} color="#80cb88"/></>}
@@ -69,7 +71,7 @@ function Island({x,z,color}:{x:number;z:number;color:string}){
 }
 function Windmill(){
  const rotor=useRef<THREE.Group>(null!);useFrame((_,dt)=>rotor.current.rotation.z+=dt*.4);
- return <group position={[-6.8,.4,-6.8]}><mesh position={[0,1.4,0]} castShadow><cylinderGeometry args={[.65,.95,2.8,12]}/><meshStandardMaterial color="#fff1d2"/></mesh><mesh position={[0,3,0]} castShadow><coneGeometry args={[1.1,1,12]}/><meshStandardMaterial color="#da8b6e"/></mesh><group ref={rotor} position={[0,2.4,.85]}>{[0,1,2,3].map(i=><group key={i} rotation={[0,0,i*Math.PI/2]}><Block at={[0,.9,0]} size={[.28,1.9,.1]} color="#f8dfb3"/></group>)}<Ball scale={[.2,.2,.2]} color="#b47a60"/></group></group>;
+ return <group position={[-6.8,.4,-6.8]}><mesh position={[0,1.4,0]} castShadow><cylinderGeometry args={[.65,.95,2.8,12]}/><meshStandardMaterial color="#fff1d2"/></mesh><mesh position={[0,3,0]} castShadow><coneGeometry args={[1.1,1,12]}/><meshStandardMaterial color="#da8b6e"/></mesh><group ref={rotor} userData={{noBatch:true}} position={[0,2.4,.85]}>{[0,1,2,3].map(i=><group key={i} rotation={[0,0,i*Math.PI/2]}><Block at={[0,.9,0]} size={[.28,1.9,.1]} color="#f8dfb3"/></group>)}<Ball scale={[.2,.2,.2]} color="#b47a60"/></group></group>;
 }
 function Star({at=[0,0,0]}:{at?:V3}){
  const geo=useMemo(()=>{const shape=new THREE.Shape();for(let i=0;i<10;i++){const r=i%2?.28:.6,a=i*Math.PI/5+Math.PI/2;const x=Math.cos(a)*r,y=Math.sin(a)*r;if(i===0)shape.moveTo(x,y);else shape.lineTo(x,y);}shape.closePath();return new THREE.ExtrudeGeometry(shape,{depth:.18,bevelEnabled:true,bevelSegments:2,steps:1,bevelSize:.06,bevelThickness:.06});},[]);
@@ -93,22 +95,10 @@ function Token({p,index,now,paused}:{p:any;index:number;now:number;paused:boolea
  });
  return <group ref={ref} position={boardPoint(p.position)} scale={.85}><Character index={p.avatar??index} walking={moving}/><mesh rotation={[-Math.PI/2,0,0]} position={[0,.02,0]}><ringGeometry args={[.48,.58,24]}/><meshBasicMaterial color={playerColors[index%4]}/></mesh></group>;
 }
-export function BoardScene({state,low=false,playerId}:{state:any;low?:boolean;playerId?:string}){
- const controls=useRef<any>(null),{camera}=useThree();
- const focus=useRef<{at:number;from:number;dice:number}|null>(null),returning=useRef(false);
- const me=state?.players?.find((p:any)=>p.id===playerId);
- useEffect(()=>{if(me?.dice&&state?.phase==='board'&&me.lastMove&&state.now-me.lastMove.at<4000){focus.current={at:performance.now(),from:me.position-me.dice,dice:me.dice};returning.current=false;}},[me?.dice,state?.round]);
- useFrame((_,dt)=>{if(!controls.current)return;
- if(focus.current){const elapsed=(performance.now()-focus.current.at)/1000;
- const p=boardPoint(focus.current.from+Math.min(focus.current.dice,Math.max(0,elapsed-ROLL_MS/1000)*4));
- const target=new THREE.Vector3(...p);
- camera.position.lerp(target.clone().add(new THREE.Vector3(8,10,12)),Math.min(1,dt*2));
- controls.current.target.lerp(target,Math.min(1,dt*2));
- if(elapsed>4){focus.current=null;returning.current=true;}
- }else if(returning.current){const dest=new THREE.Vector3(23,25,30);camera.position.lerp(dest,Math.min(1,dt*1.5));controls.current.target.lerp(new THREE.Vector3(),Math.min(1,dt*1.5));if(camera.position.distanceTo(dest)<.1)returning.current=false;}
- });
- const tiles=state?.tiles||Array.from({length:32},(_,i)=>['coin','quiz','bonus','star','trap','event'][i%6]);
- return <><Lighting low={low}/><Ocean/>
+// Static scenery is merged once and skipped on every later server update.
+const BoardScenery=memo(function BoardScenery({tilesKey,low}:{tilesKey:string;low:boolean}){
+ const tiles=tilesKey.split(',');
+ return <StaticBatch bakeKey={tilesKey+low}>
  <Island x={-5.8} z={-5.8} color="#8fc78d"/><Island x={5.8} z={-5.8} color="#bdd9a4"/><Island x={5.8} z={5.8} color="#f1d39b"/><Island x={-5.8} z={5.8} color="#a9ced4"/>
  <mesh position={[0,-.1,0]} castShadow receiveShadow><cylinderGeometry args={[3.7,4.2,1.2,48]}/><meshStandardMaterial color="#e5c6a2"/></mesh>
  <mesh position={[0,.52,0]} receiveShadow><cylinderGeometry args={[3.65,3.65,.1,48]}/><meshStandardMaterial color="#f6e4c3"/></mesh>
@@ -137,18 +127,38 @@ export function BoardScene({state,low=false,playerId}:{state:any;low?:boolean;pl
  {type==='star'?<Star at={[p[0],1.5,p[2]]}/>:type==='quiz'?<mesh position={[p[0],1.2,p[2]]} rotation={[0,Math.PI/4,0]}><octahedronGeometry args={[.22]}/><meshStandardMaterial color="#fff1ff"/></mesh>:null}
  </group>;})}
  {!low&&Array.from({length:16},(_,i)=>{const a=i*Math.PI/8,r=12+(i%3);return <Ball key={i} at={[Math.cos(a)*r,-.5,Math.sin(a)*r]} scale={[.5,.35,.7]} color="#dbd0b3"/>;})}
+ </StaticBatch>;
+});
+export function BoardScene({state,low=false,playerId}:{state:any;low?:boolean;playerId?:string}){
+ const controls=useRef<any>(null),{camera}=useThree();
+ const focus=useRef<{at:number;from:number;dice:number}|null>(null),returning=useRef(false);
+ const me=state?.players?.find((p:any)=>p.id===playerId);
+ useEffect(()=>{if(me?.dice&&state?.phase==='board'&&me.lastMove&&state.now-me.lastMove.at<4000){focus.current={at:performance.now(),from:me.position-me.dice,dice:me.dice};returning.current=false;}},[me?.dice,state?.round]);
+ useFrame((_,dt)=>{if(!controls.current)return;
+ if(focus.current){const elapsed=(performance.now()-focus.current.at)/1000;
+ const p=boardPoint(focus.current.from+Math.min(focus.current.dice,Math.max(0,elapsed-ROLL_MS/1000)*4));
+ const target=new THREE.Vector3(...p);
+ camera.position.lerp(target.clone().add(new THREE.Vector3(8,10,12)),Math.min(1,dt*2));
+ controls.current.target.lerp(target,Math.min(1,dt*2));
+ if(elapsed>4){focus.current=null;returning.current=true;}
+ }else if(returning.current){const dest=new THREE.Vector3(23,25,30);camera.position.lerp(dest,Math.min(1,dt*1.5));controls.current.target.lerp(new THREE.Vector3(),Math.min(1,dt*1.5));if(camera.position.distanceTo(dest)<.1)returning.current=false;}
+ });
+ const tiles=state?.tiles||Array.from({length:32},(_,i)=>['coin','quiz','bonus','star','trap','event'][i%6]);
+ return <><Lighting low={low}/><Ocean/>
+ <BoardScenery tilesKey={tiles.join(',')} low={low}/>
  {(state?.players||[{position:2},{position:10},{position:18},{position:26}]).map((p:any,i:number)=><Token key={p.id||i} p={p} index={i} now={state?.now??Date.now()} paused={!!state?.paused}/>)}
  <OrbitControls ref={controls} onStart={()=>{focus.current=null;returning.current=false;}} makeDefault enablePan={false} minDistance={17} maxDistance={40} minPolarAngle={.35} maxPolarAngle={1.2} autoRotate={!state} autoRotateSpeed={.35}/>
  </>;
 }
-export function ArenaDecor({game,low=false}:{game:string;low?:boolean}){
+export const ArenaDecor=memo(function ArenaDecor({game,low=false}:{game:string;low?:boolean}){
  const dark=game==='meteor'||game==='robot';
  return <><Lighting dark={dark} low={low}/>
  {!dark&&<Ocean/>}
+ <StaticBatch bakeKey={game+low}>
  {game==='lighthouse'&&<><Lighthouse at={[-7,-.4,-3]} size={1.4}/><Tree at={[7,-.4,-4]} size={1.6} palm/><Tree at={[-6,-.4,4]} size={1.1} palm/></>}
  {(game==='photo'||game==='color'||game==='kart')&&Array.from({length:low?4:8},(_,i)=>{const a=i*Math.PI/4,r=game==='kart'?12:8;return <group key={i} position={[Math.cos(a)*r,-.4,Math.sin(a)*r]}><Ball at={[0,-.4,0]} scale={[1.5,.5,1.3]} color="#ddc79f"/><Tree at={[0,0,0]} size={.9} palm={game==='color'}/></group>;})}
  {game==='photo'&&<group position={[0,0,-5.8]}><Block at={[-2,1.7,0]} size={[.4,3.5,.5]} color="#f7d6a4"/><Block at={[2,1.7,0]} size={[.4,3.5,.5]} color="#f7d6a4"/><Block at={[0,3.3,0]} size={[4.6,.45,.6]} color="#e78dac"/><Star at={[0,3.9,0]}/></group>}
  {dark&&Array.from({length:low?8:16},(_,i)=>{const a=i*Math.PI/8;return <group key={i} position={[Math.cos(a)*7,-.4,Math.sin(a)*7]}><Block size={[.8,1.5,.8]} color="#344d70"/><Block at={[0,.8,0]} size={[.65,.15,.65]} color={game==='meteor'?'#a2a2ff':'#6df2d4'}/></group>;})}
  {game==='meteor'&&!low&&Array.from({length:40},(_,i)=><mesh key={i} position={[Math.sin(i*14)*28,5+(i%7)*2,Math.cos(i*13)*28]}><sphereGeometry args={[.04,4,4]}/><meshBasicMaterial color="#e5faff"/></mesh>)}
- </>;
-}
+ </StaticBatch></>;
+});

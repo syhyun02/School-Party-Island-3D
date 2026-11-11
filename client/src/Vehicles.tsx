@@ -1,26 +1,28 @@
-import {useRef} from 'react';
+import {memo,useRef} from 'react';
 import {useFrame} from '@react-three/fiber';
 import * as THREE from 'three';
 import {Block,Ball,playerColors} from './World';
-export function Kart({index,speed,boosting}:{index:number;speed:number;boosting:boolean}){
+import {StaticBatch} from './StaticBatch';
+export const Kart=memo(function Kart({index,speed,boosting}:{index:number;speed:{current:number};boosting:boolean}){
  const wheels=useRef<THREE.Group>(null!);
- useFrame((_,dt)=>{wheels.current.children.forEach(w=>{w.rotation.x+=speed*dt*2;});});
+ useFrame((_,dt)=>{wheels.current.children.forEach(w=>{w.rotation.x+=speed.current*dt*2;});});
  const color=playerColors[index%4];
- return <group>
+ return <group><StaticBatch bakeKey={index}>
  <Block at={[0,.3,0]} size={[.95,.24,1.55]} color="#3e5e60" radius={.1}/>
  <Block at={[0,.52,.45]} size={[.85,.35,.6]} color={color} radius={.17}/>
  <Block at={[0,.38,-.57]} size={[.8,.26,.35]} color={color}/>
  <Block at={[0,.78,-.6]} size={[1.15,.12,.25]} color="#fff2ce"/>
  <Block at={[0,.65,-.2]} size={[.56,.5,.16]} color="#41666d"/>
  {[-.28,.28].map(x=><Ball key={x} at={[x,.58,.77]} scale={[.12,.07,.035]} color="#fff5a9"/>)}
- <group ref={wheels}>{[-.53,.53].flatMap(x=>[-.48,.48].map(z=><group key={x+':'+z} position={[x,.27,z]}><mesh rotation={[0,0,Math.PI/2]} castShadow><cylinderGeometry args={[.26,.26,.2,16]}/><meshStandardMaterial color="#344c54"/></mesh><mesh rotation={[0,0,Math.PI/2]}><cylinderGeometry args={[.13,.13,.23,12]}/><meshStandardMaterial color="#dfefdf" metalness={.5} roughness={.35}/></mesh></group>))}</group>
  <mesh position={[0,.85,.23]} rotation={[-.6,0,0]}><torusGeometry args={[.18,.028,6,16]}/><meshStandardMaterial color="#344c54"/></mesh>
+ </StaticBatch>
+ <group ref={wheels}>{[-.53,.53].flatMap(x=>[-.48,.48].map(z=><group key={x+':'+z} position={[x,.27,z]}><mesh rotation={[0,0,Math.PI/2]} castShadow><cylinderGeometry args={[.26,.26,.2,16]}/><meshStandardMaterial color="#344c54"/></mesh><mesh rotation={[0,0,Math.PI/2]}><cylinderGeometry args={[.13,.13,.23,12]}/><meshStandardMaterial color="#dfefdf" metalness={.5} roughness={.35}/></mesh></group>))}</group>
  {boosting&&[-.24,.24].map(x=><mesh key={x} position={[x,.35,-1.1]} rotation={[-Math.PI/2,0,0]}><coneGeometry args={[.13,.65,10]}/><meshBasicMaterial color="#a5eff9" transparent opacity={.8}/></mesh>)}
  </group>;
-}
-export function RobotChassis({index,dashing}:{index:number;dashing:boolean}){
- return <group><Block at={[0,.4,0]} size={[1.05,.55,1.05]} color={playerColors[index%4]} radius={.2}/><mesh rotation={[-Math.PI/2,0,0]} position={[0,.25,0]}><torusGeometry args={[.65,.12,8,24]}/><meshStandardMaterial color="#344f60"/></mesh><Block at={[0,.53,.55]} size={[.7,.15,.08]} color={dashing?'#fff19b':'#b4f6e2'}/>{[-.4,.4].map(x=><Ball key={x} at={[x,.8,-.35]} scale={[.12,.12,.12]} color="#c2f6ef"/>)}</group>;
-}
+});
+export const RobotChassis=memo(function RobotChassis({index,dashing}:{index:number;dashing:boolean}){
+ return <group><StaticBatch bakeKey={index+':'+dashing}><Block at={[0,.4,0]} size={[1.05,.55,1.05]} color={playerColors[index%4]} radius={.2}/><mesh rotation={[-Math.PI/2,0,0]} position={[0,.25,0]}><torusGeometry args={[.65,.12,8,24]}/><meshStandardMaterial color="#344f60"/></mesh><Block at={[0,.53,.55]} size={[.7,.15,.08]} color={dashing?'#fff19b':'#b4f6e2'}/>{[-.4,.4].map(x=><Ball key={x} at={[x,.8,-.35]} scale={[.12,.12,.12]} color="#c2f6ef"/>)}</StaticBatch></group>;
+});
 export function RaceDecor({low=false}:{low?:boolean}){
  return <group>
  {/* Alternating start tiles and a real 3D start gantry. */}

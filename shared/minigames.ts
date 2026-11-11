@@ -36,4 +36,6 @@ export function tileColor(x:number,z:number):number {
  const col=Math.floor((x+5)/2),row=Math.floor((z+5)/2);
  return col<0||col>4||row<0||row>4?-1:(col+row*2)%4;
 }
+/** Angle of the lighthouse bar at game time t; shared so clients can animate it between snapshots. */
+export function barAngle(t:number){return t*1.5+t*t*.018;}
 export function jumpHeight(a:Actor,t:number){const age=t-a.jumpAt;return age>=0&&age<.8?Math.sin(age/.8*Math.PI)*1.8:0;}

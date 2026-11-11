@@ -1,6 +1,6 @@
 import {validAvatar} from '../shared/presentation.js';
 import {randomInt} from 'node:crypto';
-import {type Actor,type GameId,type Input,type MiniState,type MiniResult,jumpHeight,tileColor} from '../shared/minigames.js';
+import {type Actor,type GameId,type Input,type MiniState,type MiniResult,jumpHeight,tileColor,barAngle} from '../shared/minigames.js';
 const rng=()=>randomInt(0,1_000_000)/1_000_000;
 const clamp=(v:number,a:number,b:number)=>Math.max(a,Math.min(b,v));
 export function createMini(game:GameId,ids:string[],random= rng,avatars:number[]=[]):MiniState {
@@ -26,7 +26,7 @@ function damage(m:MiniState,a:Actor){if(a.outAt!==null||m.elapsed-a.hitAt<1)retu
 export function stepMini(m:MiniState,dt:number,random=rng){
  if(m.done)return;
  dt=clamp(dt,0,.1);m.elapsed=Math.min(m.duration,m.elapsed+dt);const t=m.elapsed;
- m.angle=t*1.5+t*t*.018;
+ m.angle=barAngle(t);
  if(m.game==='color'){
  const cycle=Math.floor(t/7.5);
  if(cycle!==m.cycle){m.cycle=cycle;m.safe=Math.floor(random()*4);}

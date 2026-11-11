@@ -1,52 +1,87 @@
-import {useEffect,useRef,useState} from 'react';
+import {memo,useEffect,useRef,useState} from 'react';
 import {useFrame,useThree} from '@react-three/fiber';
 import * as THREE from 'three';
 import type {Socket} from 'socket.io-client';
-import {gameNames,instructions,palette,colorNames,jumpHeight,tileColor,type MiniState,type Actor} from '../../shared/minigames';
+import {gameNames,instructions,palette,colorNames,jumpHeight,tileColor,barAngle,type MiniState,type Actor,type Hazard} from '../../shared/minigames';
 import {Character,ArenaDecor,Block} from './World';
 import {Kart,RobotChassis,RaceDecor} from './Vehicles';
+import {StaticBatch} from './StaticBatch';
 const colors=['#ffb338','#a59bff','#64d6bc','#ff839f'];
 function Box({position,size,color}:{position:[number,number,number];size:[number,number,number];color:string}){
  return <Block at={position} size={size} color={color} radius={.08}/>;
 }
-function Racer({a,index,game,elapsed}:{a:Actor;index:number;game:string;elapsed:number}){
- const ref=useRef<THREE.Group>(null!);
+type Time={current:number};
+// Server snapshots arrive ~20 times a second; everything below animates every frame between them.
+function Racer({a,index,game,elapsed,time}:{a:Actor;index:number;game:string;elapsed:number;time:Time}){
+ const ref=useRef<THREE.Group>(null!),speed=useRef(a.speed);speed.current=a.speed;
+ const track=useRef({seen:a,fromX:a.x,fromZ:a.z,fromRot:0,at:0,last:0,span:50});
  useFrame((_,dt)=>{
- const y=a.outAt!==null?-1.7:jumpHeight(a,elapsed);
- ref.current.position.lerp(new THREE.Vector3(a.x,y,a.z),Math.min(1,dt*15));
- ref.current.rotation.y=game==='kart'?-a.progress/7:Math.atan2(a.dx,a.dz);
+ const now=performance.now(),t=track.current,g=ref.current;
+ if(t.seen!==a){t.seen=a;t.fromX=g.position.x;t.fromZ=g.position.z;t.fromRot=g.rotation.y;t.span=Math.max(40,Math.min(200,now-t.last));t.last=t.at=now;}
+ const far=Math.hypot(a.x-t.fromX,a.z-t.fromZ)>4,k=far?1:Math.min(1,(now-t.at)/t.span);
+ const rot=game==='kart'?-a.progress/7:Math.atan2(a.dx,a.dz),turn=Math.atan2(Math.sin(rot-t.fromRot),Math.cos(rot-t.fromRot));
+ const y=a.outAt!==null?THREE.MathUtils.lerp(g.position.y,-1.7,Math.min(1,dt*15)):jumpHeight(a,time.current);
+ g.position.set(t.fromX+(a.x-t.fromX)*k,y,t.fromZ+(a.z-t.fromZ)*k);
+ g.rotation.y=t.fromRot+turn*k;
  });
  const robot=game==='robot',kart=game==='kart';
  return <group ref={ref} position={[a.x,0,a.z]}><mesh rotation={[-Math.PI/2,0,0]} position={[0,.03,0]}><ringGeometry args={[.5,.58,24]}/><meshBasicMaterial color={colors[index]}/></mesh>
- {kart&&<Kart index={a.avatar} speed={a.speed} boosting={elapsed-a.actionAt<1.2}/>}
+ {kart&&<Kart index={a.avatar} speed={speed} boosting={elapsed-a.actionAt<1.2}/>}
  {robot&&<RobotChassis index={a.avatar} dashing={elapsed-a.actionAt<.3}/>}
  <group position={[0,kart?.4:0,0]} scale={.85}><Character index={a.avatar} robot={robot} walking={Math.hypot(a.input.x,a.input.z)>.1}/></group>
  {robot&&Array.from({length:a.hp},(_,i)=><group key={i} position={[(i-1)*.35,1.8,0]}><mesh><sphereGeometry args={[.2,8,8]}/><meshStandardMaterial color={colors[a.avatar]}/></mesh><Box position={[0,-.35,0]} size={[.015,.7,.015]} color="#fff"/></group>)}
  {elapsed-a.actionAt<.3&&(game==='photo'||robot)&&<mesh rotation={[-Math.PI/2,0,0]} position={[0,.06,0]}><ringGeometry args={[.45,.7,16]}/><meshBasicMaterial color="#fff6a1" side={THREE.DoubleSide}/></mesh>}
  </group>;
 }
-export function MiniScene({mini:m,low=false}:{mini:MiniState;low?:boolean}){
- const {camera}=useThree();
- useEffect(()=>{camera.position.set(0,m.game==='kart'?22:17,m.game==='kart'?18:13);camera.lookAt(0,0,0);},[camera,m.game]);
- const dark=m.game==='meteor'||m.game==='robot';
- return <><ArenaDecor game={m.game} low={low}/>
- {m.game==='color'?Array.from({length:25},(_,i)=>{const x=(i%5)*2-4,z=Math.floor(i/5)*2-4,c=tileColor(x,z);return <Box key={i} position={[x,m.collapsed&&c!==m.safe?-4:-.2,z]} size={[1.94,.4,1.94]} color={palette[c]}/>;}):
- m.game==='kart'?<>
+function Meteor({h,time}:{h:Hazard;time:Time}){
+ const rock=useRef<THREE.Mesh>(null!);
+ useFrame(()=>{rock.current.position.y=h.resolved?.4:Math.max(.4,(h.at-time.current)*6);});
+ return <group position={[h.x,0,h.z]}>
+ <mesh rotation={[-Math.PI/2,0,0]} position={[0,.03,0]}><ringGeometry args={[1.05,1.25,24]}/><meshBasicMaterial color={h.resolved?'#ffc36d':'#ff536c'} side={THREE.DoubleSide}/></mesh>
+ <mesh ref={rock}><icosahedronGeometry args={[h.resolved?.7:.55,0]}/><meshStandardMaterial color="#d78257" emissive="#7b2317"/></mesh>
+ </group>;
+}
+function SpinBar({time}:{time:Time}){
+ const bar=useRef<THREE.Group>(null!);
+ useFrame(()=>{bar.current.rotation.y=-barAngle(time.current);});
+ return <><group ref={bar} position={[0,.6,0]}><Box position={[2.5,0,0]} size={[5,.22,.28]} color="#ff715d"/></group><mesh position={[0,.8,0]}><cylinderGeometry args={[.35,.5,1.6,12]}/><meshStandardMaterial color="#fff0d3"/></mesh></>;
+}
+const ColorTiles=memo(function ColorTiles({safe,collapsed}:{safe:number;collapsed:boolean}){
+ return <>{Array.from({length:25},(_,i)=>{const x=(i%5)*2-4,z=Math.floor(i/5)*2-4,c=tileColor(x,z);return <Box key={i} position={[x,collapsed&&c!==safe?-4:-.2,z]} size={[1.94,.4,1.94]} color={palette[c]}/>;})}</>;
+});
+// Parts of each arena that never move: merged into one mesh and never re-rendered.
+const Arena=memo(function Arena({game,low}:{game:string;low:boolean}){
+ const dark=game==='meteor'||game==='robot';
+ if(game==='color')return null;
+ return <StaticBatch bakeKey={game+low}>
+ {game==='kart'?<>
  <mesh rotation={[-Math.PI/2,0,0]} position={[0,-.25,0]}><circleGeometry args={[10.5,64]}/><meshStandardMaterial color="#80bd92"/></mesh>
  <mesh rotation={[-Math.PI/2,0,0]} receiveShadow><ringGeometry args={[5.35,8.65,96]}/><meshStandardMaterial color="#566a73"/></mesh>
  {[5.35,7,8.65].map(r=><mesh key={r} rotation={[-Math.PI/2,0,0]} position={[0,.015,0]}><ringGeometry args={[r-.035,r+.035,96]}/><meshBasicMaterial color="#f8ebc1"/></mesh>)}
  <Box position={[7,.03,0]} size={[3.3,.04,.35]} color="#fff"/>
  {Array.from({length:6},(_,i)=>{const a=(i+1)*14/7;return <mesh key={i} position={[Math.cos(a)*7,.4,Math.sin(a)*7]} rotation={[0,a,Math.PI/4]}><octahedronGeometry args={[.25]}/><meshStandardMaterial color="#b5ff61" emissive="#5e8d20"/></mesh>;})}
  <RaceDecor low={low}/>
- </>:<mesh position={[0,-.25,0]} receiveShadow><cylinderGeometry args={[5.4,5.6,.5,48]}/><meshStandardMaterial color={dark?'#53647e':m.game==='photo'?'#e9b8c9':'#ead5b6'}/></mesh>}
- {m.game==='lighthouse'&&<><group rotation={[0,-m.angle,0]} position={[0,.6,0]}><Box position={[2.5,0,0]} size={[5,.22,.28]} color="#ff715d"/></group><mesh position={[0,.8,0]}><cylinderGeometry args={[.35,.5,1.6,12]}/><meshStandardMaterial color="#fff0d3"/></mesh></>}
- {m.game==='meteor'&&m.hazards.map(h=><group key={h.id} position={[h.x,0,h.z]}>
- <mesh rotation={[-Math.PI/2,0,0]} position={[0,.03,0]}><ringGeometry args={[1.05,1.25,24]}/><meshBasicMaterial color={h.resolved?'#ffc36d':'#ff536c'} side={THREE.DoubleSide}/></mesh>
- <mesh position={[0,h.resolved?.4:Math.max(.4,(h.at-m.elapsed)*6),0]}><icosahedronGeometry args={[h.resolved?.7:.55,0]}/><meshStandardMaterial color="#d78257" emissive="#7b2317"/></mesh>
- </group>)}
- {m.game==='photo'&&<>{[1,2.5,4].map((r,i)=><mesh key={r} rotation={[-Math.PI/2,0,0]} position={[0,.01+i*.01,0]}><ringGeometry args={[r-.06,r,48]}/><meshBasicMaterial color="#fff4d7"/></mesh>)}<group position={[0,1,-5]}><Box position={[0,.5,0]} size={[1,.6,.5]} color="#354f65"/><Box position={[0,-.4,0]} size={[.12,1.5,.12]} color="#536f79"/></group>{m.elapsed<m.flashUntil&&<pointLight position={[0,5,0]} intensity={120} color="white"/>}</>}
- {m.game==='robot'&&Array.from({length:12},(_,i)=><Box key={i} position={[Math.cos(i*Math.PI/6)*5.25,.5,Math.sin(i*Math.PI/6)*5.25]} size={[.35,1,.35]} color="#61d6d0"/>)}
- {m.actors.map((a,i)=><Racer key={a.id} a={a} index={i} game={m.game} elapsed={m.elapsed}/>)}
+ </>:<mesh position={[0,-.25,0]} receiveShadow><cylinderGeometry args={[5.4,5.6,.5,48]}/><meshStandardMaterial color={dark?'#53647e':game==='photo'?'#e9b8c9':'#ead5b6'}/></mesh>}
+ {game==='photo'&&<>{[1,2.5,4].map((r,i)=><mesh key={r} rotation={[-Math.PI/2,0,0]} position={[0,.01+i*.01,0]}><ringGeometry args={[r-.06,r,48]}/><meshBasicMaterial color="#fff4d7"/></mesh>)}<group position={[0,1,-5]}><Box position={[0,.5,0]} size={[1,.6,.5]} color="#354f65"/><Box position={[0,-.4,0]} size={[.12,1.5,.12]} color="#536f79"/></group></>}
+ {game==='robot'&&Array.from({length:12},(_,i)=><Box key={i} position={[Math.cos(i*Math.PI/6)*5.25,.5,Math.sin(i*Math.PI/6)*5.25]} size={[.35,1,.35]} color="#61d6d0"/>)}
+ </StaticBatch>;
+});
+export function MiniScene({mini:m,low=false,running=false}:{mini:MiniState;low?:boolean;running?:boolean}){
+ const {camera}=useThree();
+ useEffect(()=>{camera.position.set(0,m.game==='kart'?22:17,m.game==='kart'?18:13);camera.lookAt(0,0,0);},[camera,m.game]);
+ // Local estimate of the server's game clock, eased toward each snapshot so motion never steps backwards.
+ const time=useRef(m.elapsed),anchor=useRef({elapsed:m.elapsed,at:performance.now()});
+ if(anchor.current.elapsed!==m.elapsed)anchor.current={elapsed:m.elapsed,at:performance.now()};
+ useFrame((_,dt)=>{
+ const target=anchor.current.elapsed+(running?Math.min(.25,(performance.now()-anchor.current.at)/1000):0),next=time.current+(running?dt:0);
+ time.current=Math.abs(target-next)>.3?target:next+(target-next)*.15;
+ });
+ return <><ArenaDecor game={m.game} low={low}/><Arena game={m.game} low={low}/>
+ {m.game==='color'&&<ColorTiles safe={m.safe} collapsed={m.collapsed}/>}
+ {m.game==='lighthouse'&&<SpinBar time={time}/>}
+ {m.game==='meteor'&&m.hazards.map(h=><Meteor key={h.id} h={h} time={time}/>)}
+ {m.game==='photo'&&m.elapsed<m.flashUntil&&<pointLight position={[0,5,0]} intensity={120} color="white"/>}
+ {m.actors.map((a,i)=><Racer key={a.id} a={a} index={i} game={m.game} elapsed={m.elapsed} time={time}/>)}
  </>;
 }
 export function MiniControls({mini:m,id,socket}:{mini:MiniState;id:string;socket:Socket}){
